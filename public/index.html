@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Онлайн Шахматы</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/chessboard-js/1.0.0/chessboard-1.0.0.min.css"/>
+  <style>
+    body {
+      font-family: sans-serif;
+      text-align: center;
+      padding: 20px;
+    }
+    #board {
+      width: 400px;
+      margin: auto;
+    }
+    .highlight {
+      background-color: yellow !important;
+      opacity: 0.7;
+    }
+    .invalid-move {
+      background-color: red !important;
+      opacity: 0.6;
+      transition: background-color 0.5s ease;
+    }
+  </style>
+</head>
+<body>
+  <h1>Онлайн Шахматы</h1>
+  <div id="board"></div>
+  <p id="status">Ожидание подключения...</p>
+
+  <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/chess.js/0.10.2/chess.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/chessboard-js/1.0.0/chessboard-1.0.0.min.js"></script>
+  <script src="/socket.io/socket.io.js"></script>
+
+  <script>
+    const socket = io();
+    const game = new Chess();
+    let board = null;
+    let myColor = null;
+    let selectedSquare = null;
+
+    const clearHighlights = () => {
+      document.querySelectorAll('#board .square-55d63').forEach(el => {
+        el.classList.remove('highlight', 'invalid-move');
+      });
+    };
+
+    const highlightMoves = (square) => {
+      const moves = game.moves({ square, verbose: true });
+      moves.forEach(move => {
+        const el = document.querySelector(`.square-${move.to}`);
+        if (el) el.classList.add('highlight');
+      });
+    };
+
+    socket.on('playerColor', (color) => {
+      myColor = color;
+      document.getElementById('status').innerText = 'Вы играете за: ' + color;
+      board = Chessboard('board', {
+        draggable: false,
+        position: 'start',
+        orientation: myColor
+      });
+    });
+
+    socket.on('fenUpdate', (fen) => {
+      game.load(fen);
+      board.position(fen);
+    });
+
+    socket.on('roomFull', () => {
+      document.getElementById('status').innerText = 'Комната заполнена. Попробуйте позже.';
+    });
+
+    document.getElementById('board').addEventListener('click', (event) => {
+      if (!myColor || game.turn() !== myColor[0]) return;
+
+      const squareElement = event.target.closest('[class^="square-"]');
+      if (!squareElement) return;
+
+      const squareId = squareElement.className.match(/square-([a-h][1-8])/)[1];
+      clearHighlights();
+
+      if (!selectedSquare) {
+        const piece = game.get(squareId);
+        if (!piece || piece.color !== myColor[0]) return;
+        selectedSquare = squareId;
+        highlightMoves(squareId);
+      } else {
+        const move = game.move({
+          from: selectedSquare,
+          to: squareId,
+          promotion: 'q'
+        });
+
+        if (move === null) {
+          const el = document.querySelector(`.square-${squareId}`);
+          if (el) {
+            el.classList.add('invalid-move');
+            setTimeout(() => el.classList.remove('invalid-move'), 500);
+          }
+        } else {
+          board.position(game.fen());
+          socket.emit('move', game.fen());
+
+          if (game.in_checkmate()) {
+            document.getElementById('status').innerText = 'Мат! Игра окончена.';
+          } else if (game.in_stalemate()) {
+            document.getElementById('status').innerText = 'Пат. Ничья.';
+          } else if (game.in_check()) {
+            document.getElementById('status').innerText = `Шах! Ход выполнен: ${move.san}`;
+          } else {
+            document.getElementById('status').innerText = `Ход выполнен: ${move.san}`;
+          }
+        }
+        selectedSquare = null;
+      }
+    });
+  </script>
+</body>
+</html>
